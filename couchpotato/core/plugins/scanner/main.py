@@ -6,15 +6,15 @@ from couchpotato.core.helpers.variable import getExt, getImdb, tryInt, \
 from couchpotato.core.logger import CPLog
 from couchpotato.core.plugins.base import Plugin
 from couchpotato.core.settings.model import File, Media
-from enzyme.exceptions import NoParserError, ParseError
 from guessit import guess_movie_info
-from subliminal.videos import Video
+from subliminal.video import Video
 import enzyme
 import os
 import re
 import threading
 import time
 import traceback
+
 
 log = CPLog(__name__)
 
@@ -500,10 +500,6 @@ class Scanner(Plugin):
                 'resolution_height': tryInt(p.video[0].height),
                 'audio_channels': p.audio[0].channels,
             }
-        except ParseError:
-            log.debug('Failed to parse meta for %s', filename)
-        except NoParserError:
-            log.debug('No parser found for %s', filename)
         except:
             log.debug('Failed parsing %s', filename)
 
