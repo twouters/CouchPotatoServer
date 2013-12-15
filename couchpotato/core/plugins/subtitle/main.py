@@ -14,7 +14,8 @@ log = CPLog(__name__)
 
 class Subtitle(Plugin):
 
-    services = ['opensubtitles', 'thesubdb', 'subswiki', 'podnapisi']
+    services = ['addic7ed', 'opensubtitles', 'podnapisi', 'thesubdb', 'tvsubtitles']
+    subliminal.cache_region.configure('dogpile.cache.dbm', arguments={'filename': Env.get('cache_dir') + '/subliminal_cache.dbm'})
 
     def __init__(self):
         addEvent('renamer.before', self.searchSingle)
@@ -39,7 +40,7 @@ class Subtitle(Plugin):
                         files.append(file.path)
 
                     # get subtitles for those files
-                    subliminal.list_subtitles(files, cache_dir = Env.get('cache_dir'), multi = True, languages = self.getLanguages(), services = self.services)
+                    subliminal.download_best_subtitles(files, languages = self.getLanguages(), providers = self.services)
 
     def searchSingle(self, group):
         if self.isDisabled(): return
@@ -52,7 +53,7 @@ class Subtitle(Plugin):
 
             for lang in self.getLanguages():
                 if lang not in available_languages:
-                    download = subliminal.download_subtitles(files, multi = True, force = False, languages = [lang], services = self.services, cache_dir = Env.get('cache_dir'))
+                    download = subliminal.download_best_subtitles(files, languages = self.getLanguages(), providers = self.services)
                     for subtitle in download:
                         downloaded.extend(download[subtitle])
 
