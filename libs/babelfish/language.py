@@ -13,12 +13,11 @@ from .country import Country
 
 CONVERTERS = {}
 LANGUAGES = set()
-f = resource_stream('babelfish', 'data/iso-639-3.tab')
-f.readline()
-for l in f:
-    (alpha3, _, _, _, _, _, _, _) = l.decode('utf-8').split('\t')
-    LANGUAGES.add(alpha3)
-f.close()
+with resource_stream('babelfish', 'data/iso-639-3.tab') as f:
+    f.readline()
+    for l in f:
+        (alpha3, _, _, _, _, _, _, _) = l.decode('utf-8').split('\t')
+        LANGUAGES.add(alpha3)
 
 
 class Language(object):
@@ -37,7 +36,7 @@ class Language(object):
     """
     def __init__(self, language, country=None):
         if language not in LANGUAGES:
-            raise ValueError('%r is not a valid language' % language)
+            raise ValueError('{} is not a valid language'.format(language))
         self.alpha3 = language
         self.country = None
         if isinstance(country, Country):
@@ -46,10 +45,6 @@ class Language(object):
             self.country = None
         else:
             self.country = Country(country)
-
-    @classmethod
-    def fromcode(cls, code, converter):
-        return cls(*CONVERTERS[converter].reverse(code))
 
     def __getattr__(self, name):
         if name not in CONVERTERS:
@@ -67,13 +62,13 @@ class Language(object):
     def __ne__(self, other):
         return not self == other
 
-    def __repr__(self):
-        return '<Language [%s]>' % self
-
-    def __str__(self):
-        if self.country is not None:
-            return '%s-%s' % (self.alpha3, self.country)
+    def __unicode__(self):
         return self.alpha3
+
+    def __repr__(self):
+        if self.country is not None:
+            return '<Language {}, country={}>'.format(self.name, self.country.name)
+        return '<Language {}>'.format(self.name)
 
 
 def register_converter(name, converter):
@@ -90,10 +85,12 @@ def register_converter(name, converter):
 
     """
     if name in CONVERTERS:
-        raise ValueError('Converter %r already exists' % name)
+        raise ValueError('Converter {} already exists'.format(name))
     CONVERTERS[name] = converter()
     if isinstance(CONVERTERS[name], ReverseConverter):
-        setattr(Language, 'from' + name, partial(Language.fromcode, converter=name))
+        def fromcode(cls, code, converter):
+            return cls(*CONVERTERS[converter].reverse(code))
+        setattr(Language, 'from' + name, classmethod(partial(fromcode, converter=name)))
 
 
 def unregister_converter(name):
@@ -104,7 +101,7 @@ def unregister_converter(name):
 
     """
     if name not in CONVERTERS:
-        raise ValueError('Converter %r does not exist' % name)
+        raise ValueError('Converter {} does not exist'.format(name))
     if isinstance(CONVERTERS[name], ReverseConverter):
         delattr(Language, 'from' + name)
     del CONVERTERS[name]

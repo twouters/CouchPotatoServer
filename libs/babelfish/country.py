@@ -9,12 +9,11 @@ from pkg_resources import resource_stream  # @UnresolvedImport
 
 
 COUNTRIES = {}
-f = resource_stream('babelfish', 'data/iso-3166-1.txt')
-f.readline()
-for l in f:
-    (name, alpha2) = l.decode('utf-8').strip().split(';')
-    COUNTRIES[alpha2] = name
-f.close()
+with resource_stream('babelfish', 'data/iso-3166-1.txt') as f:
+    f.readline()
+    for l in f:
+        (name, alpha2) = l.decode('utf-8').strip().split(';')
+        COUNTRIES[alpha2] = name
 
 
 class Country(object):
@@ -27,7 +26,7 @@ class Country(object):
     """
     def __init__(self, country):
         if country not in COUNTRIES:
-            raise ValueError('%r is not a valid country' % country)
+            raise ValueError('{} is not a valid country'.format(country))
 
         #: ISO-3166 two-letters country code
         self.alpha2 = country
@@ -47,7 +46,4 @@ class Country(object):
         return not self == other
 
     def __repr__(self):
-        return '<Country [%s]>' % self
-
-    def __str__(self):
-        return self.alpha2
+        return '<Country {}>'.format(self.name)
