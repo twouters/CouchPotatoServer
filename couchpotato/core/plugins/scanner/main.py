@@ -1,6 +1,6 @@
 from couchpotato import get_session
 from couchpotato.core.event import fireEvent, addEvent
-from couchpotato.core.helpers.encoding import toUnicode, simplifyString, ss
+from couchpotato.core.helpers.encoding import toUnicode, simplifyString, ss, sp
 from couchpotato.core.helpers.variable import getExt, getImdb, tryInt, \
     splitString
 from couchpotato.core.logger import CPLog
@@ -108,7 +108,7 @@ class Scanner(Plugin):
 
     def scan(self, folder = None, files = None, release_download = None, simple = False, newer_than = 0, return_ignored = True, on_found = None):
 
-        folder = ss(os.path.normpath(folder))
+        folder = sp(folder)
 
         if not folder or not os.path.isdir(folder):
             log.error('Folder doesn\'t exists: %s', folder)
@@ -124,7 +124,7 @@ class Scanner(Plugin):
             try:
                 files = []
                 for root, dirs, walk_files in os.walk(folder):
-                    files.extend(os.path.join(root, filename) for filename in walk_files)
+                    files.extend([sp(os.path.join(root, filename)) for filename in walk_files])
 
                     # Break if CP wants to shut down
                     if self.shuttingDown():
@@ -134,7 +134,7 @@ class Scanner(Plugin):
                 log.error('Failed getting files from %s: %s', (folder, traceback.format_exc()))
         else:
             check_file_date = False
-            files = [ss(x) for x in files]
+            files = [sp(x) for x in files]
 
 
         for file_path in files:
@@ -454,7 +454,7 @@ class Scanner(Plugin):
                 data['resolution_width'] = meta.get('resolution_width', 720)
                 data['resolution_height'] = meta.get('resolution_height', 480)
                 data['audio_channels'] = meta.get('audio_channels', 2.0)
-                data['aspect'] = meta.get('resolution_width', 720) / meta.get('resolution_height', 480)
+                data['aspect'] = round(float(meta.get('resolution_width', 720)) / meta.get('resolution_height', 480), 2)
             except:
                 log.debug('Error parsing metadata: %s %s', (cur_file, traceback.format_exc()))
                 pass
