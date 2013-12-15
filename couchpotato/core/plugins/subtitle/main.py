@@ -53,7 +53,7 @@ class Subtitle(Plugin):
 
             for lang in self.getLanguages():
                 if lang not in available_languages:
-                    download = subliminal.download_best_subtitles(files, languages = self.getLanguages(), providers = self.services)
+                    download = subliminal.download_best_subtitles(files, languages = [lang], providers = self.services)
                     for subtitle in download:
                         downloaded.extend(download[subtitle])
 
