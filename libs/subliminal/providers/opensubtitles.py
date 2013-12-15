@@ -7,12 +7,11 @@ import re
 import xmlrpclib
 import zlib
 import babelfish
-import charade
 import guessit
 from . import Provider
 from .. import __version__
 from ..exceptions import ProviderError, ProviderNotAvailable, InvalidSubtitle
-from ..subtitle import Subtitle, is_valid_subtitle, compute_guess_matches
+from ..subtitle import Subtitle, decode, is_valid_subtitle, compute_guess_matches
 from ..video import Episode, Movie
 
 
@@ -23,9 +22,9 @@ class OpenSubtitlesSubtitle(Subtitle):
     provider_name = 'opensubtitles'
     series_re = re.compile('^"(?P<series_name>.*)" (?P<series_title>.*)$')
 
-    def __init__(self, language, hearing_impaired, id, matched_by, movie_kind, hash, movie_name, movie_release_name, movie_year,
-                 movie_imdb_id, series_season, series_episode):
-        super(OpenSubtitlesSubtitle, self).__init__(language, hearing_impaired)
+    def __init__(self, language, hearing_impaired, id, matched_by, movie_kind, hash, movie_name, movie_release_name,  # @ReservedAssignment
+                 movie_year, movie_imdb_id, series_season, series_episode, page_link):
+        super(OpenSubtitlesSubtitle, self).__init__(language, hearing_impaired, page_link)
         self.id = id
         self.matched_by = matched_by
         self.movie_kind = movie_kind
@@ -83,7 +82,7 @@ class OpenSubtitlesSubtitle(Subtitle):
 
 
 class OpenSubtitlesProvider(Provider):
-    languages = {babelfish.Language.fromopensubtitles(l) for l in babelfish.CONVERTERS['opensubtitles'].codes}
+    languages = {babelfish.Language.fromopensubtitles(l) for l in babelfish.get_language_converter('opensubtitles').codes}
 
     def __init__(self):
         self.server = xmlrpclib.ServerProxy('http://api.opensubtitles.org/xml-rpc')
@@ -91,7 +90,7 @@ class OpenSubtitlesProvider(Provider):
 
     def initialize(self):
         try:
-            response = self.server.LogIn('', '', 'eng', 'subliminal v%s' % __version__)
+            response = self.server.LogIn('', '', 'eng', 'subliminal v%s' % __version__.split('-')[0])
         except xmlrpclib.ProtocolError:
             raise ProviderNotAvailable
         if response['status'] != '200 OK':
@@ -106,7 +105,7 @@ class OpenSubtitlesProvider(Provider):
         if response['status'] != '200 OK':
             raise ProviderError('Logout failed with status %r' % response['status'])
 
-    def query(self, languages, hash=None, size=None, imdb_id=None, query=None):
+    def query(self, languages, hash=None, size=None, imdb_id=None, query=None):  # @ReservedAssignment
         searches = []
         if hash and size:
             searches.append({'moviehash': hash, 'moviebytesize': str(size)})
@@ -128,20 +127,20 @@ class OpenSubtitlesProvider(Provider):
         if not response['data']:
             logger.debug('No subtitle found')
             return []
-        logger.debug('Found subtitles %r', response['data'])
         return [OpenSubtitlesSubtitle(babelfish.Language.fromopensubtitles(r['SubLanguageID']),
                                       bool(int(r['SubHearingImpaired'])), r['IDSubtitleFile'], r['MatchedBy'],
                                       r['MovieKind'], r['MovieHash'], r['MovieName'], r['MovieReleaseName'],
                                       int(r['MovieYear']) if r['MovieYear'] else None, int(r['IDMovieImdb']),
                                       int(r['SeriesSeason']) if r['SeriesSeason'] else None,
-                                      int(r['SeriesEpisode']) if r['SeriesEpisode'] else None)
+                                      int(r['SeriesEpisode']) if r['SeriesEpisode'] else None, r['SubtitlesLink'])
                 for r in response['data']]
 
     def list_subtitles(self, video, languages):
         query = None
         if ('opensubtitles' not in video.hashes or not video.size) and not video.imdb_id:
             query = video.name.split(os.sep)[-1]
-        return self.query(languages, hash=video.hashes.get('opensubtitles'), size=video.size, imdb_id=video.imdb_id, query=query)
+        return self.query(languages, hash=video.hashes.get('opensubtitles'), size=video.size, imdb_id=video.imdb_id,
+                          query=query)
 
     def download_subtitle(self, subtitle):
         try:
@@ -153,7 +152,7 @@ class OpenSubtitlesProvider(Provider):
         if not response['data']:
             raise ProviderError('Nothing to download')
         subtitle_bytes = zlib.decompress(base64.b64decode(response['data'][0]['data']), 47)
-        subtitle_text = subtitle_bytes.decode(charade.detect(subtitle_bytes)['encoding'], 'replace')
-        if not is_valid_subtitle(subtitle_text):
+        subtitle_content = decode(subtitle_bytes, subtitle.language)
+        if not is_valid_subtitle(subtitle_content):
             raise InvalidSubtitle
-        return subtitle_text
+        subtitle.content = subtitle_content

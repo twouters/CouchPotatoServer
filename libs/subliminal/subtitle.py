@@ -3,6 +3,7 @@ from __future__ import unicode_literals
 import logging
 import os.path
 import babelfish
+import charade
 import pysrt
 from .video import Episode, Movie
 
@@ -16,11 +17,17 @@ class Subtitle(object):
     :param language: language of the subtitle
     :type language: :class:`babelfish.Language`
     :param bool hearing_impaired: `True` if the subtitle is hearing impaired, `False` otherwise
+    :param page_link: link to the web page from which the subtitle can be downloaded, if any
+    :type page_link: string or None
 
     """
-    def __init__(self, language, hearing_impaired=False):
+    def __init__(self, language, hearing_impaired=False, page_link=None):
         self.language = language
         self.hearing_impaired = hearing_impaired
+        self.page_link = page_link
+
+        #: Subtitle's content once downloaded with :meth:`~subliminal.providers.Provider.download_subtitle`
+        self.content = None
 
     def compute_matches(self, video):
         """Compute the matches of the subtitle against the `video`
@@ -62,9 +69,9 @@ class Subtitle(object):
             # remove equivalences
             if isinstance(video, Episode):
                 if 'imdb_id' in matches:
-                    matches -= {'series', 'tvdb_id', 'season', 'episode', 'title'}
+                    matches -= {'series', 'tvdb_id', 'season', 'episode', 'title', 'year'}
                 if 'tvdb_id' in matches:
-                    matches -= {'series'}
+                    matches -= {'series', 'year'}
                 if 'title' in matches:
                     matches -= {'season', 'episode'}
             # add other scores
@@ -73,7 +80,7 @@ class Subtitle(object):
         return score
 
     def __repr__(self):
-        return '<%s [%r]>' % (self.__class__.__name__, self.language)
+        return '<%s [%s]>' % (self.__class__.__name__, self.language)
 
 
 def get_subtitle_path(video_path, language=None):
@@ -90,7 +97,7 @@ def get_subtitle_path(video_path, language=None):
     if language is not None:
         try:
             return subtitle_path + '.%s.%s' % (language.alpha2, 'srt')
-        except babelfish.ConvertError:
+        except babelfish.LanguageConvertError:
             return subtitle_path + '.%s.%s' % (language.alpha3, 'srt')
     return subtitle_path + '.srt'
 
@@ -105,8 +112,12 @@ def is_valid_subtitle(subtitle_text):
     try:
         pysrt.from_string(subtitle_text, error_handling=pysrt.ERROR_RAISE)
         return True
-    except pysrt.Error:
-        return False
+    except pysrt.Error as e:
+        if e.args[0] > 80:
+            return True
+    except:
+        logger.exception('Unexpected error when validating subtitle')
+    return False
 
 
 def compute_guess_matches(video, guess):
@@ -122,32 +133,70 @@ def compute_guess_matches(video, guess):
     """
     matches = set()
     if isinstance(video, Episode):
-        # Series
+        # series
         if video.series and 'series' in guess and guess['series'].lower() == video.series.lower():
             matches.add('series')
-        # Season
+        # season
         if video.season and 'seasonNumber' in guess and guess['seasonNumber'] == video.season:
             matches.add('season')
-        # Episode
+        # episode
         if video.episode and 'episodeNumber' in guess and guess['episodeNumber'] == video.episode:
             matches.add('episode')
+        # year
+        if video.year == guess.get('year'):  # count "no year" as an information
+            matches.add('year')
     elif isinstance(video, Movie):
-        # Year
+        # year
         if video.year and 'year' in guess and guess['year'] == video.year:
             matches.add('year')
-    # Title
+    # title
     if video.title and 'title' in guess and guess['title'].lower() == video.title.lower():
         matches.add('title')
-    # Release group
+    # release group
     if video.release_group and 'releaseGroup' in guess and guess['releaseGroup'].lower() == video.release_group.lower():
         matches.add('release_group')
-    # Screen size
+    # screen size
     if video.resolution and 'screenSize' in guess and guess['screenSize'] == video.resolution:
         matches.add('resolution')
-    # Video codec
+    # video codec
     if video.video_codec and 'videoCodec' in guess and guess['videoCodec'] == video.video_codec:
         matches.add('video_codec')
-    # Audio codec
+    # audio codec
     if video.audio_codec and 'audioCodec' in guess and guess['audioCodec'] == video.audio_codec:
         matches.add('audio_codec')
     return matches
+
+
+def decode(content, language):
+    """Decode subtitle `content` in a specified `language`
+
+    :param bytes content: content of the subtitle
+    :param language: language of the subtitle
+    :type language: :class:`babelfish.Language`
+    :return: the decoded `content` bytes
+    :rtype: string
+
+    """
+    # always try utf-8 first
+    encodings = ['utf-8']
+
+    # add language-specific encodings
+    if language.alpha3 == 'zho':
+        encodings.extend(['gb18030', 'big5'])
+    elif language.alpha3 == 'jpn':
+        encodings.append('shift-jis')
+    elif language.alpha3 == 'ara':
+        encodings.append('windows-1256')
+    else:
+        encodings.append('latin-1')
+
+    # try to decode
+    for encoding in encodings:
+        try:
+            return content.decode(encoding)
+        except UnicodeDecodeError:
+            pass
+
+    # fallback on charade
+    logger.warning('Could not decode content with encodings %r', encodings)
+    return content.decode(charade.detect(content)['encoding'], 'replace')

@@ -2,12 +2,11 @@
 from __future__ import unicode_literals
 import logging
 import babelfish
-import charade
 import requests
 from . import Provider
 from .. import __version__
 from ..exceptions import InvalidSubtitle, ProviderNotAvailable, ProviderError
-from ..subtitle import Subtitle, is_valid_subtitle
+from ..subtitle import Subtitle, decode, is_valid_subtitle
 
 
 logger = logging.getLogger(__name__)
@@ -16,7 +15,7 @@ logger = logging.getLogger(__name__)
 class TheSubDBSubtitle(Subtitle):
     provider_name = 'thesubdb'
 
-    def __init__(self, language, hash):
+    def __init__(self, language, hash):  # @ReservedAssignment
         super(TheSubDBSubtitle, self).__init__(language)
         self.hash = hash
 
@@ -35,7 +34,7 @@ class TheSubDBProvider(Provider):
     def initialize(self):
         self.session = requests.Session()
         self.session.headers = {'User-Agent': 'SubDB/1.0 (subliminal/%s; https://github.com/Diaoul/subliminal)' %
-                                __version__}
+                                __version__.split('-')[0]}
 
     def terminate(self):
         self.session.close()
@@ -55,7 +54,7 @@ class TheSubDBProvider(Provider):
             raise ProviderNotAvailable('Timeout after 10 seconds')
         return r
 
-    def query(self, hash):
+    def query(self, hash):  # @ReservedAssignment
         params = {'action': 'search', 'hash': hash}
         logger.debug('Searching subtitles %r', params)
         r = self.get(params)
@@ -75,7 +74,7 @@ class TheSubDBProvider(Provider):
         r = self.get(params)
         if r.status_code != 200:
             raise ProviderError('Request failed with status code %d' % r.status_code)
-        subtitle_text = r.content.decode(charade.detect(r.content)['encoding'], 'replace')
-        if not is_valid_subtitle(subtitle_text):
+        subtitle_content = decode(r.content, subtitle.language)
+        if not is_valid_subtitle(subtitle_content):
             raise InvalidSubtitle
-        return subtitle_text
+        subtitle.content = subtitle_content

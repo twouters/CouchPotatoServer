@@ -7,10 +7,8 @@ import os
 import re
 import sys
 import babelfish
-import guessit
-import pkg_resources
-from subliminal import (__version__, PROVIDERS_ENTRY_POINT, cache_region, Video, Episode, Movie, scan_videos,
-    download_best_subtitles)
+from subliminal import (__version__, cache_region, MutexLock, PROVIDERS, Video, Episode, Movie, scan_videos,
+    download_best_subtitles, save_subtitles)
 try:
     import colorlog
 except ImportError:
@@ -29,7 +27,7 @@ def subliminal():
     required_arguments_group = parser.add_argument_group('required arguments')
     required_arguments_group.add_argument('paths', nargs='+', metavar='PATH', help='path to video file or folder')
     required_arguments_group.add_argument('-l', '--languages', nargs='+', required=True, metavar='LANGUAGE',
-                                          help='wanted languages as alpha2 code (ISO-639-1)')
+                                          help='wanted languages as IETF codes e.g. fr, pt-BR, sr-Cyrl ')
 
     # configuration
     configuration_group = parser.add_argument_group('configuration')
@@ -40,9 +38,8 @@ def subliminal():
 
     # filtering
     filtering_group = parser.add_argument_group('filtering')
-    providers = [ep.name for ep in pkg_resources.iter_entry_points(PROVIDERS_ENTRY_POINT)]
     filtering_group.add_argument('-p', '--providers', nargs='+', metavar='PROVIDER',
-                                 help='providers to use (%s)' % ', '.join(providers))
+                                 help='providers to use (%s)' % ', '.join(PROVIDERS))
     filtering_group.add_argument('-m', '--min-score', type=int,
                                  help='minimum score for subtitles (0-%d for episodes, 0-%d for movies)'
                                  % (Episode.scores['hash'], Movie.scores['hash']))
@@ -59,9 +56,13 @@ def subliminal():
 
     # output
     output_group = parser.add_argument_group('output')
+    output_group.add_argument('-d', '--directory',
+                              help='save subtitles in the given directory rather than next to the video')
+    output_group.add_argument('-e', '--encoding', default='utf-8', help='subtitles encoding (default: %(default)s)')
     output_exclusive_group = output_group.add_mutually_exclusive_group()
     output_exclusive_group.add_argument('-q', '--quiet', action='store_true', help='disable output')
     output_exclusive_group.add_argument('-v', '--verbose', action='store_true', help='verbose output')
+    output_group.add_argument('--log-file', help='log into a file instead of stdout')
     output_group.add_argument('--color', action='store_true', help='add color to console output (requires colorlog)')
 
     # troubleshooting
@@ -81,9 +82,9 @@ def subliminal():
 
     # parse languages
     try:
-        args.languages = {babelfish.Language.fromalpha2(l) for l in args.languages}
+        args.languages = {babelfish.Language.fromietf(l) for l in args.languages}
     except babelfish.Error:
-        parser.error('argument -l/--languages: codes are not ISO-639-1: %r' % args.languages)
+        parser.error('argument -l/--languages: codes are not IETF: %r' % args.languages)
 
     # parse age
     if args.age is not None:
@@ -111,52 +112,79 @@ def subliminal():
         parser.error('argument --color: colorlog required')
 
     # setup output
-    if args.debug:
+    if args.log_file is None:
         handler = logging.StreamHandler()
+    else:
+        handler = logging.FileHandler(args.log_file, encoding='utf-8')
+    if args.debug:
         if args.color:
-            handler.setFormatter(colorlog.ColoredFormatter('%(log_color)s%(levelname)-8s%(reset)s [%(blue)s%(name)s-%(funcName)s:%(lineno)d%(reset)s] %(message)s',
+            if args.log_file is None:
+                log_format = '%(log_color)s%(levelname)-8s%(reset)s [%(blue)s%(name)s-%(funcName)s:%(lineno)d%(reset)s] %(message)s'
+            else:
+                log_format = '%(purple)s%(asctime)s%(reset)s %(log_color)s%(levelname)-8s%(reset)s [%(blue)s%(name)s-%(funcName)s:%(lineno)d%(reset)s] %(message)s'
+            handler.setFormatter(colorlog.ColoredFormatter(log_format,
                                                            log_colors=dict(colorlog.default_log_colors.items() + [('DEBUG', 'cyan')])))
         else:
-            handler.setFormatter(logging.Formatter('%(levelname)-8s [%(name)s-%(funcName)s:%(lineno)d] %(message)s'))
+            if args.log_file is None:
+                log_format = '%(levelname)-8s [%(name)s-%(funcName)s:%(lineno)d] %(message)s'
+            else:
+                log_format = '%(asctime)s %(levelname)-8s [%(name)s-%(funcName)s:%(lineno)d] %(message)s'
+            handler.setFormatter(logging.Formatter(log_format))
         logging.getLogger().addHandler(handler)
         logging.getLogger().setLevel(logging.DEBUG)
     elif args.verbose:
-        handler = logging.StreamHandler()
         if args.color:
-            handler.setFormatter(colorlog.ColoredFormatter('%(log_color)s%(levelname)-8s%(reset)s [%(blue)s%(name)s%(reset)s] %(message)s'))
+            if args.log_file is None:
+                log_format = '%(log_color)s%(levelname)-8s%(reset)s [%(blue)s%(name)s%(reset)s] %(message)s'
+            else:
+                log_format = '%(purple)s%(asctime)s%(reset)s %(log_color)s%(levelname)-8s%(reset)s [%(blue)s%(name)s%(reset)s] %(message)s'
+            handler.setFormatter(colorlog.ColoredFormatter(log_format))
         else:
-            handler.setFormatter(logging.Formatter('%(levelname)-8s [%(name)s] %(message)s'))
+            log_format = '%(levelname)-8s [%(name)s] %(message)s'
+            if args.log_file is not None:
+                log_format = '%(asctime)s ' + log_format
+            handler.setFormatter(logging.Formatter(log_format))
         logging.getLogger('subliminal').addHandler(handler)
         logging.getLogger('subliminal').setLevel(logging.INFO)
     elif not args.quiet:
-        handler = logging.StreamHandler()
         if args.color:
-            handler.setFormatter(colorlog.ColoredFormatter('[%(log_color)s%(levelname)s%(reset)s] %(message)s'))
+            if args.log_file is None:
+                log_format = '[%(log_color)s%(levelname)s%(reset)s] %(message)s'
+            else:
+                log_format = '%(purple)s%(asctime)s%(reset)s [%(log_color)s%(levelname)s%(reset)s] %(message)s'
+            handler.setFormatter(colorlog.ColoredFormatter(log_format))
         else:
-            handler.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
+            if args.log_file is None:
+                log_format = '%(levelname)s: %(message)s'
+            else:
+                log_format = '%(asctime)s %(levelname)s: %(message)s'
+            handler.setFormatter(logging.Formatter(log_format))
         logging.getLogger('subliminal.api').addHandler(handler)
         logging.getLogger('subliminal.api').setLevel(logging.INFO)
 
     # configure cache
-    cache_region.configure('dogpile.cache.dbm', arguments={'filename': args.cache_file})
+    cache_region.configure('dogpile.cache.dbm', expiration_time=datetime.timedelta(days=30),  # @UndefinedVariable
+                           arguments={'filename': args.cache_file, 'lock_factory': MutexLock})
 
     # scan videos
     videos = scan_videos([p for p in args.paths if os.path.exists(p)], subtitles=not args.force,
                          embedded_subtitles=not args.force, age=args.age)
 
     # guess videos
-    videos.extend([Video.fromguess(os.path.split(p)[1], guessit.guess_file_info(p, 'autodetect')) for p in args.paths
-                   if not os.path.exists(p)])
+    videos.extend([Video.fromname(p) for p in args.paths if not os.path.exists(p)])
 
     # download best subtitles
     subtitles = download_best_subtitles(videos, args.languages, providers=args.providers,
-                                        provider_configs=provider_configs, single=args.single,
-                                        min_score=args.min_score, hearing_impaired=args.hearing_impaired)
+                                        provider_configs=provider_configs, min_score=args.min_score,
+                                        hearing_impaired=args.hearing_impaired, single=args.single)
+
+    # save subtitles
+    save_subtitles(subtitles, single=args.single, directory=args.directory, encoding=args.encoding)
 
     # result output
     if not subtitles:
         if not args.quiet:
-            sys.stderr.write('No subtitles downloaded\n')
+            print('No subtitles downloaded', file=sys.stderr)
         exit(1)
     if not args.quiet:
         subtitles_count = sum([len(s) for s in subtitles.values()])
