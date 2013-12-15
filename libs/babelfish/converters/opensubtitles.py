@@ -5,17 +5,22 @@
 # that can be found in the LICENSE file.
 #
 from __future__ import unicode_literals
-from .alpha3b import Alpha3BConverter
+from . import LanguageReverseConverter, CaseInsensitiveDict
+from ..exceptions import LanguageReverseError
+from ..language import get_language_converter
 
 
-class OpenSubtitlesConverter(Alpha3BConverter):
+class OpenSubtitlesConverter(LanguageReverseConverter):
     def __init__(self):
-        super(OpenSubtitlesConverter, self).__init__()
-        self.to_opensubtitles = {('por', 'BR'): 'pob'}
-        self.from_opensubtitles = {'pob': ('por', 'BR')}
+        self.alpha3b_converter = get_language_converter('alpha3b')
+        self.alpha2_converter = get_language_converter('alpha2')
+        self.to_opensubtitles = {('por', 'BR'): 'pob', ('gre', None): 'ell', ('srp', None): 'scc', ('srp', 'ME'): 'mne'}
+        self.from_opensubtitles = CaseInsensitiveDict({'pob': ('por', 'BR'), 'pb': ('por', 'BR'), 'ell': ('ell', None),
+                                                       'scc': ('srp', None), 'mne': ('srp', 'ME')})
+        self.codes = (self.alpha2_converter.codes | self.alpha3b_converter.codes | set(['pob', 'pb', 'scc', 'mne']))
 
-    def convert(self, alpha3, country=None):
-        alpha3b = super(OpenSubtitlesConverter, self).convert(alpha3, country)
+    def convert(self, alpha3, country=None, script=None):
+        alpha3b = self.alpha3b_converter.convert(alpha3, country, script)
         if (alpha3b, country) in self.to_opensubtitles:
             return self.to_opensubtitles[(alpha3b, country)]
         return alpha3b
@@ -23,4 +28,9 @@ class OpenSubtitlesConverter(Alpha3BConverter):
     def reverse(self, opensubtitles):
         if opensubtitles in self.from_opensubtitles:
             return self.from_opensubtitles[opensubtitles]
-        return super(OpenSubtitlesConverter, self).reverse(opensubtitles)
+        for conv in [self.alpha3b_converter, self.alpha2_converter]:
+            try:
+                return conv.reverse(opensubtitles)
+            except LanguageReverseError:
+                pass
+        raise LanguageReverseError(opensubtitles)

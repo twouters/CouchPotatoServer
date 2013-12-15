@@ -5,29 +5,13 @@
 # that can be found in the LICENSE file.
 #
 from __future__ import unicode_literals
-from pkg_resources import resource_stream  # @UnresolvedImport
-from . import ReverseConverter
-from ..exceptions import NoConversionError
+from . import LanguageEquivalenceConverter
+from ..language import LANGUAGE_MATRIX
 
 
-class Alpha3BConverter(ReverseConverter):
-    def __init__(self):
-        self.to_alpha3b = {}
-        self.from_alpha3b = {}
-        with resource_stream('babelfish', 'data/iso-639-3.tab') as f:
-            f.readline()
-            for l in f:
-                (alpha3, alpha3b, _, _, _, _, _, _) = l.decode('utf-8').split('\t')
-                if alpha3b != '':
-                    self.to_alpha3b[alpha3] = alpha3b
-                    self.from_alpha3b[alpha3b] = alpha3
-
-    def convert(self, alpha3, country=None):
-        if alpha3 not in self.to_alpha3b:
-            raise NoConversionError
-        return self.to_alpha3b[alpha3]
-
-    def reverse(self, alpha3b):
-        if alpha3b not in self.from_alpha3b:
-            raise NoConversionError
-        return (self.from_alpha3b[alpha3b], None)
+class Alpha3BConverter(LanguageEquivalenceConverter):
+    CASE_SENSITIVE = True
+    SYMBOLS = {}
+    for iso_language in LANGUAGE_MATRIX:
+        if iso_language.alpha3b:
+            SYMBOLS[iso_language.alpha3] = iso_language.alpha3b
