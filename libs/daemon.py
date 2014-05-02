@@ -61,7 +61,11 @@ class Daemon():
         # write pidfile
         atexit.register(self.delpid)
         pid = str(os.getpid())
-        file(self.pidfile, 'w+').write("%s\n" % pid)
+        try:
+            file(self.pidfile, 'w+').write("%s\n" % pid)
+        except IOError, e:
+            sys.stderr.write("failed to write pidfile: %d (%s)\n" % (e.errno, e.strerror))
+            sys.exit(1)
 
     def delpid(self):
         if os.path.exists(self.pidfile):
